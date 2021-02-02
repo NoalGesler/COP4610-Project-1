@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 typedef struct {
 	int size;
@@ -34,7 +35,25 @@ int main()
 			printf("token %d: (%s)\n", i, tokens->items[i]);
 		}
 		expand_Env(tokens);
-		path_Search(tokens);
+                char* command_check = (char *) malloc(sizeof(tokens->items[0]));
+                strcpy(command_check, tokens->items[0]);
+                command_check = strchr(command_check, '/');
+                char* cmd_Path = (char *) malloc(sizeof(tokens->items[0]));
+                if(command_check == NULL){
+                        cmd_Path = path_Search(tokens);
+                }
+                else{
+                        strcpy(cmd_Path, tokens->items[0]);
+                }
+                if(cmd_Path != NULL){
+			int pid = fork();
+			if(pid == 0){
+				execv(tokens->items[0], tokens->items);
+			}
+			else{
+				waitpid(pid, NULL, 0);
+			}
+                }
 		free(input);
 		free_tokens(tokens);
 		x = 0;		
@@ -161,6 +180,8 @@ char* path_Search(tokenlist *tokens){
 		strcat(current, command);
 		FILE *tester = fopen(current, "r");
 		if(tester){
+			tokens->items[0] = (char *) realloc(tokens->items[0], strlen(current));
+			strcpy(tokens->items[0], current);
 			return current;
 		}
 	}
