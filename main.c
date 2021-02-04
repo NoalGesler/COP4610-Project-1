@@ -32,14 +32,18 @@ int main()
 		 */
 
 		char *input = get_input();
-
+		if(input[0] == '\0'){
+			continue;
+		}
 		tokenlist *tokens = get_tokens(input);
+		char exitchk[4] = "exit";
+		if(strstr(tokens->items[0], exitchk) != NULL){
+			break;
+		}
 		expand_Env(tokens);
-		char* redirect = (char *) malloc(sizeof(tokens->items[0]));
 		int inpos = -1;
 		for(int i = 0; i < tokens->size; i++){
-			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
-			strcpy(redirect, tokens->items[i]);
+			char* redirect = tokens->items[i];
 			redirect = strchr(redirect, '<');
 			if(redirect != NULL){
 				inpos = i;
@@ -48,8 +52,7 @@ int main()
 		}
 		int outpos = -1;
 		for(int i = 0; i < tokens->size; i++){
-			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
-			strcpy(redirect, tokens->items[i]);
+			char* redirect = tokens->items[i];
 			redirect = strchr(redirect, '>');
 			if(redirect != NULL){
 				outpos = i;
@@ -59,8 +62,7 @@ int main()
 		int pipe1 = -1;
 		int pipe2 = -1;
 		for(int i = 0; i < tokens->size; i++){
-			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
-			strcpy(redirect, tokens->items[i]);
+			char* redirect = tokens->items[i];
 			redirect = strchr(redirect, '|');
 			if(redirect != NULL){
 				if(pipe1 == -1){
@@ -199,9 +201,11 @@ int main()
 				}
 			}
                 }
+		wait(0);
 		free(input);
 		free_tokens(tokens);
-		x = 0;		
+		free(cmd_Path);
+		free(command_check);
 	}
 
 	return 0;
@@ -288,7 +292,7 @@ void expand_Env(tokenlist *tokens){
 			char *expanded = getenv(temp);
 			int j = strlen(getenv(temp));
 			expanded[j] = '\0';
-			tokens->items[i] = (char *) realloc(tokens->items[i], strlen(expanded));
+			tokens->items[i] = (char *) realloc(tokens->items[i], strlen(expanded)*2);
 			strcpy(tokens->items[i], expanded);
 		}
 		else if(tokens->items[i][0] == '~'){
@@ -308,8 +312,8 @@ char* path_Search(tokenlist *tokens){
 	int max = strlen(path) + strlen(command) + 1;
 	int endcheck = 0;
 	int success = 0;
-	char *pathcopy = (char *) malloc(strlen(path));
-	strcpy(pathcopy, path);
+	char *pathcopy = path;
+	//strcpy(pathcopy, path);
 	while(endcheck == 0){
 		char *current = (char *) malloc(strlen(path));
 		strcpy(current, pathcopy);
@@ -325,13 +329,16 @@ char* path_Search(tokenlist *tokens){
 		strcat(current, command);
 		FILE *tester = fopen(current, "r");
 		if(tester){
-			tokens->items[0] = (char *) realloc(tokens->items[0], strlen(current));
+			tokens->items[0] = (char *) realloc(tokens->items[0], strlen(current)*2);
 			strcpy(tokens->items[0], current);
+			free(command);
 			return current;
 		}
+		free(current);
 	}
 	printf("Command not found\n");
 	char notfound[100] = "DNE";
 	strcpy(path, notfound);
+	free(command);
 	return path;
 }
