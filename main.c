@@ -3,6 +3,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 typedef struct {
 	int size;
@@ -22,7 +25,7 @@ int main()
 {
 	int x = 1;
 	while (x==1) {
-		printf("%s@%s:%s> ", getenv("USER"), getenv("MACHINE"), getenv("PWD"));
+		printf("%s@%s:%s>", getenv("USER"), getenv("MACHINE"), getenv("PWD"));
 
 		/* input contains the whole command
 		 * tokens contains substrings from input split by spaces
@@ -31,10 +34,47 @@ int main()
 		char *input = get_input();
 
 		tokenlist *tokens = get_tokens(input);
-		for(int i = 0; i < tokens->size; i++){
-			printf("token %d: (%s)\n", i, tokens->items[i]);
-		}
 		expand_Env(tokens);
+		char* redirect = (char *) malloc(sizeof(tokens->items[0]));
+		int inpos = -1;
+		for(int i = 0; i < tokens->size; i++){
+			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
+			strcpy(redirect, tokens->items[i]);
+			redirect = strchr(redirect, '<');
+			if(redirect != NULL){
+				inpos = i;
+				break;
+			}
+		}
+		int outpos = -1;
+		for(int i = 0; i < tokens->size; i++){
+			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
+			strcpy(redirect, tokens->items[i]);
+			redirect = strchr(redirect, '>');
+			if(redirect != NULL){
+				outpos = i;
+				break;
+			}
+		}
+		int pipe1 = -1;
+		int pipe2 = -1;
+		for(int i = 0; i < tokens->size; i++){
+			redirect = (char *) realloc(redirect, sizeof(tokens->items[i]));
+			strcpy(redirect, tokens->items[i]);
+			redirect = strchr(redirect, '|');
+			if(redirect != NULL){
+				if(pipe1 == -1){
+					pipe1 = i;
+				}
+				else if(pipe2 == -1 && pipe1 != -1){
+					pipe2 = i;
+					break;
+				}
+				else{
+					break;
+				}
+			}
+		}
                 char* command_check = (char *) malloc(sizeof(tokens->items[0]));
                 strcpy(command_check, tokens->items[0]);
                 command_check = strchr(command_check, '/');
@@ -46,12 +86,117 @@ int main()
                         strcpy(cmd_Path, tokens->items[0]);
                 }
                 if(cmd_Path != NULL){
-			int pid = fork();
-			if(pid == 0){
-				execv(tokens->items[0], tokens->items);
+			if(inpos != -1 && outpos != -1){
+				pid_t pid = fork();
+				int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+				if(pid == 0){
+					close(0);
+					dup(fd);
+					close(fd);
+					int fd2 = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+					close(1);
+					dup(fd2);
+					close(fd2);
+					execv(tokens->items[0], tokens->items);
+				}
+				else{
+					waitpid(pid, NULL, 0);
+				}
+			}
+			else if(inpos != -1 && outpos == -1){
+				pid_t pid = fork();
+				int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+				if(pid == 0){
+					close(0);
+					dup(fd);
+					close(fd);
+					execv(tokens->items[0], tokens->items);
+				}
+				else{
+					waitpid(pid, NULL, 0);
+				}
+			}
+			else if(inpos == -1 && outpos != -1){
+				pid_t pid = fork();
+				int fd = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+				if(pid == 0){
+					close(1);
+					dup(fd);
+					close(fd);
+					execv(tokens->items[0], tokens->items);
+				}
+				else{
+					waitpid(pid, NULL, 0);
+				}
+			}
+			else if(pipe1 != -1 && pipe2 != -1){
+				int pd[2];
+				int pds[2];
+				pipe(pd);
+				int pid;
+				pid = fork();
+				if(pid == 0){
+					dup2(pd[1], 1);
+					close(pd[0]);
+					close(pd[1]);
+					execv(tokens->items[0], tokens->items);
+				}
+				pipe(pds);
+				pid = fork();
+				if(pid == 0){
+					dup2(pd[0], 0);
+					dup2(pds[1], 1);
+					close(pd[0]);
+					close(pd[1]);
+					close(pds[0]);
+					close(pds[1]);
+					execv(tokens->items[pipe1+1], tokens->items);
+				}
+				close(pd[0]);
+				close(pd[1]);
+				pid = fork();
+				if(pid == 0){
+					dup2(pds[0], 0);
+					close(pds[0]);
+					close(pds[1]);
+					execv(tokens->items[pipe2+1], tokens->items);
+				}
+				close(pds[0]);
+				close(pds[1]);
+				waitpid(-1, NULL, 0);
+				waitpid(-1, NULL, 0);
+				waitpid(1, NULL, 0);
+			}
+			else if(pipe1 != -1 && pipe2 == -1){
+				int pd[2];
+				pipe(pd);
+				int pid = fork();
+				if(pid == 0){
+					dup2(pd[1], 1);
+					close(pd[1]);
+					close(pd[0]);
+					execv(tokens->items[0], tokens->items);
+				}
+				pid = fork();
+				if(pid == 0){
+					dup2(pd[0], 0);
+					close(pd[0]);
+					close(pd[1]);
+					execv(tokens->items[pipe1+1], tokens->items);
+				}
+				close(pd[0]);
+				close(pd[1]);
+				waitpid(-1, NULL, 0);
+				waitpid(1, NULL, 0);
 			}
 			else{
-				waitpid(pid, NULL, 0);
+				pid_t pid = fork();
+				if(pid == 0){
+					execv(tokens->items[0], tokens->items);
+				}
+				else{
+					waitpid(pid, NULL, 0);
+				}
 			}
                 }
 		free(input);
