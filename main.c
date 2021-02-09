@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <time.h>
 
 typedef struct {
 	int size;
@@ -23,6 +24,13 @@ char* path_Search(tokenlist *tokens); //Returns string with command location for
 
 int main()
 {
+	time_t runTime;
+	time_t finishTime;
+	time_t initTime;
+	time_t doneTime;
+	int timeRan;
+	int longest = 1;
+	runTime = time(NULL);
 	int x = 1;
 	while (x==1) {
 		printf("%s@%s:%s>", getenv("USER"), getenv("MACHINE"), getenv("PWD"));
@@ -37,10 +45,29 @@ int main()
 		}
 		tokenlist *tokens = get_tokens(input);
 		char exitchk[4] = "exit";
+		char cdchk[4] = "cd";
+		char echochk[4] = "echo";
 		if(strstr(tokens->items[0], exitchk) != NULL){
 			break;
 		}
 		expand_Env(tokens);
+		if(strstr(tokens->items[0], cdchk) != NULL){
+			int cdstatus;
+			if (tokens->size > 2){
+				printf("Too many arguments. syntax: cd PATH\n");
+			} else if (tokens->size == 1){
+				cdstatus = chdir(getenv("HOME"));
+			} else {
+			cdstatus = chdir(tokens->items[1]);
+			}
+			if(cdstatus == -1){
+				printf("ERROR. syntax: cd PATH\n");
+			}
+		}
+		if(strstr(tokens->items[0], echochk) != NULL){
+			for(int i = 0; i < tokens->size; i++){
+			}
+		}
 		int inpos = -1;
 		for(int i = 0; i < tokens->size; i++){
 			char* redirect = tokens->items[i];
@@ -88,6 +115,7 @@ int main()
                         strcpy(cmd_Path, tokens->items[0]);
                 }
                 if(cmd_Path != NULL){
+					initTime = time(NULL);	
 			if(inpos != -1 && outpos != -1){
 				pid_t pid = fork();
 				int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
@@ -200,14 +228,26 @@ int main()
 					waitpid(pid, NULL, 0);
 				}
 			}
-                }
+            }
+				doneTime = time(NULL);
+				if (((int)doneTime - (int)initTime) >= longest){
+					longest = (int)doneTime - (int)initTime;
+				}
 		wait(0);
 		free(input);
 		free_tokens(tokens);
 		free(cmd_Path);
 		free(command_check);
+		
 	}
-
+	finishTime = time(NULL);
+	timeRan = (int)finishTime - (int)runTime;
+	printf("Shell ran for ");
+	printf(	"%d", timeRan);
+	printf(" seconds and took ");
+	printf ("%d", longest);
+	printf("%s\n", " second(s) to execute one command");
+	fflush(stdout);
 	return 0;
 }
 
