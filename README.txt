@@ -25,4 +25,5 @@ Part 9, background processing, is very rough. Currently, it can handle small ope
 however we found it difficult to test larger programs, and are unsure on how that operates.
 In part 10, we could not find a suitable way of tracking time for some of the smaller executions (we felt very limited by C),
 and thus any program under an execution time of 1 second will print out 1 second as its execution time.
+Some commands will sometimes work, other times it will not. We have not found out why (Ex: cd sometimes changes CWD, sometimes doesn't).
 Otherwise, however, we have not found any bugs in the rest of the program.
