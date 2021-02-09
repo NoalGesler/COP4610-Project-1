@@ -21,6 +21,8 @@ void add_token(tokenlist *tokens, char *item);
 void free_tokens(tokenlist *tokens);
 void expand_Env(tokenlist *tokens); //Expands tokens with ~(home) or $(env), no return
 char* path_Search(tokenlist *tokens); //Returns string with command location for use in execv(), only use with commands with no "/"
+void cmd_execute(tokenlist *tokens, int pipe1, int pipe2, int inpos, int outpos);
+void bg_execute(tokenlist *tokens, int pipe1, int pipe2, int inpos, int outpos, tokenlist *tokenscopy, int pid, int queuesize, int* statuspointer);
 
 int main()
 {
@@ -31,10 +33,21 @@ int main()
 	int timeRan;
 	int longest = 1;
 	runTime = time(NULL);
-	int x = 1;
-	while (x==1) {
-		printf("%s@%s:%s>", getenv("USER"), getenv("MACHINE"), getenv("PWD"));
-
+	int status = 0;
+	int queuesize = 0;
+	tokenlist *tokenscopy;
+	char cwd[1000];
+	strcpy(cwd, getenv("PWD"));
+	while (1) {
+		int statcopy = waitpid(status, 0, WNOHANG);
+		if(status > 0){
+			printf("[%d]+ %d\t", queuesize+1, status);
+			for(int i = 0; i < tokenscopy->size; i++){
+				printf("%s ", tokenscopy->items[i]);
+			}
+			printf("\n");
+		}
+		printf("%s@%s:%s>", getenv("USER"), getenv("MACHINE"), cwd);
 		/* input contains the whole command
 		 * tokens contains substrings from input split by spaces
 		 */
@@ -43,10 +56,27 @@ int main()
 		if(input[0] == '\0'){
 			continue;
 		}
+		if(input[0] == 'j' && input[1] == 'o' && input[2] == 'b' && input[3] == 's' && status > 0){
+			printf("[%d]+ %d\t", queuesize+1, status);
+                        for(int i = 0; i < tokenscopy->size; i++){
+                                printf("%s ", tokenscopy->items[i]);
+                        }
+                        printf("\n");
+			continue;
+		}
+		if(status > 0){
+			status = 0;
+		}
 		tokenlist *tokens = get_tokens(input);
-		char exitchk[4] = "exit";
-		char cdchk[4] = "cd";
-		char echochk[4] = "echo";
+		tokenscopy = get_tokens(input);
+		char exitchk[5] = "exit";
+		exitchk[4] = '\0';
+		char cdchk[3] = "cd";
+		cdchk[2] = '\0';
+		char echochk[5] = "echo";
+		echochk[4] = '\0';
+		int lasttoken = tokens->size;
+		lasttoken -= 1;
 		if(strstr(tokens->items[0], exitchk) != NULL){
 			break;
 		}
@@ -57,16 +87,22 @@ int main()
 				printf("Too many arguments. syntax: cd PATH\n");
 			} else if (tokens->size == 1){
 				cdstatus = chdir(getenv("HOME"));
+				getcwd(cwd, sizeof(cwd));
 			} else {
 			cdstatus = chdir(tokens->items[1]);
+			getcwd(cwd, sizeof(cwd));
 			}
 			if(cdstatus == -1){
 				printf("ERROR. syntax: cd PATH\n");
 			}
+			continue;
 		}
 		if(strstr(tokens->items[0], echochk) != NULL){
-			for(int i = 0; i < tokens->size; i++){
+			for(int i = 1; i < tokens->size; i++){
+				printf("%s ", tokens->items[i]);
 			}
+			printf("\n");
+			continue;
 		}
 		int inpos = -1;
 		for(int i = 0; i < tokens->size; i++){
@@ -114,132 +150,23 @@ int main()
                 else{
                         strcpy(cmd_Path, tokens->items[0]);
                 }
-                if(cmd_Path != NULL){
-					initTime = time(NULL);	
-			if(inpos != -1 && outpos != -1){
-				pid_t pid = fork();
-				int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
-				if(pid == 0){
-					close(0);
-					dup(fd);
-					close(fd);
-					int fd2 = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
-					close(1);
-					dup(fd2);
-					close(fd2);
-					execv(tokens->items[0], tokens->items);
-				}
-				else{
-					waitpid(pid, NULL, 0);
-				}
-			}
-			else if(inpos != -1 && outpos == -1){
-				pid_t pid = fork();
-				int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
-				if(pid == 0){
-					close(0);
-					dup(fd);
-					close(fd);
-					execv(tokens->items[0], tokens->items);
-				}
-				else{
-					waitpid(pid, NULL, 0);
-				}
-			}
-			else if(inpos == -1 && outpos != -1){
-				pid_t pid = fork();
-				int fd = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
-				if(pid == 0){
-					close(1);
-					dup(fd);
-					close(fd);
-					execv(tokens->items[0], tokens->items);
-				}
-				else{
-					waitpid(pid, NULL, 0);
-				}
-			}
-			else if(pipe1 != -1 && pipe2 != -1){
-				int pd[2];
-				int pds[2];
-				pipe(pd);
-				int pid;
-				pid = fork();
-				if(pid == 0){
-					dup2(pd[1], 1);
-					close(pd[0]);
-					close(pd[1]);
-					execv(tokens->items[0], tokens->items);
-				}
-				pipe(pds);
-				pid = fork();
-				if(pid == 0){
-					dup2(pd[0], 0);
-					dup2(pds[1], 1);
-					close(pd[0]);
-					close(pd[1]);
-					close(pds[0]);
-					close(pds[1]);
-					execv(tokens->items[pipe1+1], tokens->items);
-				}
-				close(pd[0]);
-				close(pd[1]);
-				pid = fork();
-				if(pid == 0){
-					dup2(pds[0], 0);
-					close(pds[0]);
-					close(pds[1]);
-					execv(tokens->items[pipe2+1], tokens->items);
-				}
-				close(pds[0]);
-				close(pds[1]);
-				waitpid(-1, NULL, 0);
-				waitpid(-1, NULL, 0);
-				waitpid(1, NULL, 0);
-			}
-			else if(pipe1 != -1 && pipe2 == -1){
-				int pd[2];
-				pipe(pd);
-				int pid = fork();
-				if(pid == 0){
-					dup2(pd[1], 1);
-					close(pd[1]);
-					close(pd[0]);
-					execv(tokens->items[0], tokens->items);
-				}
-				pid = fork();
-				if(pid == 0){
-					dup2(pd[0], 0);
-					close(pd[0]);
-					close(pd[1]);
-					execv(tokens->items[pipe1+1], tokens->items);
-				}
-				close(pd[0]);
-				close(pd[1]);
-				waitpid(-1, NULL, 0);
-				waitpid(1, NULL, 0);
-			}
-			else{
-				pid_t pid = fork();
-				if(pid == 0){
-					execv(tokens->items[0], tokens->items);
-				}
-				else{
-					waitpid(pid, NULL, 0);
-				}
-			}
-            }
-				doneTime = time(NULL);
-				if (((int)doneTime - (int)initTime) >= longest){
-					longest = (int)doneTime - (int)initTime;
-				}
+                if(cmd_Path != NULL && tokens->items[tokens->size - 1][0] != '&'){
+					initTime = time(NULL);
+			cmd_execute(tokens, pipe1, pipe2, inpos, outpos);
+                }
+		else if(cmd_Path != NULL && tokens->items[lasttoken][0] == '&'){
+			initTime = time(NULL);
+			int* statuspointer;
+			statuspointer = &status;
+			bg_execute(tokens, pipe1, pipe2, inpos, outpos, tokenscopy, status, queuesize, statuspointer);
+		}
 		wait(0);
 		free(input);
 		free_tokens(tokens);
 		free(cmd_Path);
 		free(command_check);
-		
 	}
+	strcpy(cwd, "");
 	finishTime = time(NULL);
 	timeRan = (int)finishTime - (int)runTime;
 	printf("Shell ran for ");
@@ -353,7 +280,6 @@ char* path_Search(tokenlist *tokens){
 	int endcheck = 0;
 	int success = 0;
 	char *pathcopy = path;
-	//strcpy(pathcopy, path);
 	while(endcheck == 0){
 		char *current = (char *) malloc(strlen(path));
 		strcpy(current, pathcopy);
@@ -381,4 +307,237 @@ char* path_Search(tokenlist *tokens){
 	strcpy(path, notfound);
 	free(command);
 	return path;
+}
+
+void cmd_execute(tokenlist *tokens, int pipe1, int pipe2, int inpos, int outpos){
+	if(inpos != -1 && outpos != -1){
+		pid_t pid = fork();
+		int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+		if(pid == 0){
+			close(0);
+			dup(fd);
+			close(fd);
+			int fd2 = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+			close(1);
+			dup(fd2);
+			close(fd2);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, 0);
+		}
+	}
+	else if(inpos != -1 && outpos == -1){
+		pid_t pid = fork();
+		int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+		if(pid == 0){
+			close(0);
+			dup(fd);
+			close(fd);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, 0);
+		}
+	}
+	else if(inpos == -1 && outpos != -1){
+		pid_t pid = fork();
+		int fd = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+		if(pid == 0){
+			close(1);
+			dup(fd);
+			close(fd);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, 0);
+		}
+	}
+	else if(pipe1 != -1 && pipe2 != -1){
+		int pd[2];
+		int pds[2];
+		pipe(pd);
+		int pid;
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[1], 1);
+			close(pd[0]);
+			close(pd[1]);
+			execv(tokens->items[0], tokens->items);
+		}
+		pipe(pds);
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[0], 0);
+			dup2(pds[1], 1);
+			close(pd[0]);
+			close(pd[1]);
+			close(pds[0]);
+			close(pds[1]);
+			execv(tokens->items[pipe1+1], tokens->items);
+		}
+		close(pd[0]);
+		close(pd[1]);
+		pid = fork();
+		if(pid == 0){
+			dup2(pds[0], 0);
+			close(pds[0]);
+			close(pds[1]);
+			execv(tokens->items[pipe2+1], tokens->items);
+		}
+		close(pds[0]);
+		close(pds[1]);
+		waitpid(-1, NULL, 0);
+		waitpid(-1, NULL, 0);
+		waitpid(1, NULL, 0);
+	}
+	else if(pipe1 != -1 && pipe2 == -1){
+		int pd[2];
+		pipe(pd);
+		int pid = fork();
+		if(pid == 0){
+			dup2(pd[1], 1);
+			close(pd[1]);
+			close(pd[0]);
+			execv(tokens->items[0], tokens->items);
+		}
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[0], 0);
+			close(pd[0]);
+			close(pd[1]);
+			execv(tokens->items[pipe1+1], tokens->items);
+		}
+		close(pd[0]);
+		close(pd[1]);
+		waitpid(-1, NULL, 0);
+		waitpid(1, NULL, 0);
+	}
+	else{
+		pid_t pid = fork();
+		if(pid == 0){
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, 0);
+		}
+	}
+}
+
+void bg_execute(tokenlist *tokens, int pipe1, int pipe2, int inpos, int outpos, tokenlist *tokenscopy, int pid, int queuesize, int* statuspointer){
+	queuesize++;
+	if(inpos != -1 && outpos != -1){
+		pid = fork();
+		int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+		if(pid == 0){
+			close(0);
+			dup(fd);
+			close(fd);
+			int fd2 = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+			close(1);
+			dup(fd2);
+			close(fd2);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, WNOHANG);
+		}
+	}
+	else if(inpos != -1 && outpos == -1){
+		pid = fork();
+		int fd = open(tokens->items[inpos+1], O_RDONLY, S_IROTH);
+		if(pid == 0){
+			close(0);
+			dup(fd);
+			close(fd);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, WNOHANG);
+		}
+	}
+	else if(inpos == -1 && outpos != -1){
+		pid = fork();
+		int fd = open(tokens->items[outpos+1], O_RDWR|O_CREAT|O_TRUNC, S_IRWXU);
+		if(pid == 0){
+			close(1);
+			dup(fd);
+			close(fd);
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(pid, NULL, WNOHANG);
+		}
+	}
+	else if(pipe1 != -1 && pipe2 != -1){
+		int pd[2];
+		int pds[2];
+		pipe(pd);
+		pid;
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[1], 1);
+			close(pd[0]);
+			close(pd[1]);
+			execv(tokens->items[0], tokens->items);
+		}
+		pipe(pds);
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[0], 0);
+			dup2(pds[1], 1);
+			close(pd[0]);
+			close(pd[1]);
+			close(pds[0]);
+			close(pds[1]);
+			execv(tokens->items[pipe1+1], tokens->items);
+		}
+		close(pd[0]);
+		close(pd[1]);
+		pid = fork();
+		if(pid == 0){
+			dup2(pds[0], 0);
+			close(pds[0]);
+			close(pds[1]);
+			execv(tokens->items[pipe2+1], tokens->items);
+		}
+		close(pds[0]);
+		close(pds[1]);
+		waitpid(pid, NULL, WNOHANG);
+		waitpid(pid, NULL, WNOHANG);
+		waitpid(pid, NULL, WNOHANG);
+	}
+	else if(pipe1 != -1 && pipe2 == -1){
+		int pd[2];
+		pipe(pd);
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[1], 1);
+			close(pd[1]);
+			close(pd[0]);
+			execv(tokens->items[0], tokens->items);
+		}
+		pid = fork();
+		if(pid == 0){
+			dup2(pd[0], 0);
+			close(pd[0]);
+			close(pd[1]);
+			execv(tokens->items[pipe1+1], tokens->items);
+		}
+		close(pd[0]);
+		close(pd[1]);
+		waitpid(pid, NULL, WNOHANG);
+		waitpid(pid, NULL, WNOHANG);
+	}
+	else{
+		pid = fork();
+		if(pid == 0){
+			execv(tokens->items[0], tokens->items);
+		}
+		else{
+			waitpid(-1, NULL, WNOHANG);
+		}
+	}
+	printf("[%d] %d\n", queuesize, pid);
+	*statuspointer = pid;
 }
